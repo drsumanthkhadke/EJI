@@ -1,0 +1,876 @@
+library(tidyverse)
+library(DescTools)
+library(readxl)
+# imported places data
+places<-data.frame(read.csv("PLACES.csv"))
+#select variables of interest in places data
+places1<- places[, c(1:5,7,9,17,19,25,31,37,41, 67,69,71,73,75,77,79)]
+places1$asthma<-with(places1, places1$CASTHMA_CrudePrev*1000) #converting into prevalence per 100,000
+places1$copd<-with(places1, places1$COPD_CrudePrev*1000) #converting into prevalence per 100,000
+
+#imported EJI data
+eji<-data.frame(read_csv("EJI.csv"))
+
+#select variables of interest in EJI data
+eji1<-subset(eji,select=c(AFFGEOID,GEOID,RPL_SER,RPL_EBM,RPL_EBM_DOM1,RPL_EBM_DOM2,RPL_EBM_DOM3,RPL_EBM_DOM4,RPL_EBM_DOM5,
+                          RPL_SVM,RPL_SVM_DOM1,RPL_SVM_DOM2,RPL_SVM_DOM3,RPL_SVM_DOM4))
+
+#changing column name from geoid to GEO_ID in EJI data
+colnames(eji1)[3]="EJI" #RPL_SER (ranked percentile socio-environmental rank renamed as EJI)
+colnames(eji1)[2]="GEO_ID"
+View(eji1)
+
+#Define categories of EJI;SVI and EBM
+eji1$EJIcat<-with(eji1,ifelse(EJI>0.75,"high",
+                              ifelse(EJI>0.50 & EJI <=0.75,"medium",
+                                     ifelse(EJI >0.25 & EJI <=0.50, "low medium",
+                                            ifelse(EJI <=0.25,"low", EJI)))))
+
+eji1$EBMcat<-with(eji1,ifelse(RPL_EBM>0.75,"high",
+                              ifelse(RPL_EBM>0.50 & RPL_EBM <=0.75,"medium",
+                                     ifelse(RPL_EBM >0.25 & RPL_EBM <=0.50, "low medium",
+                                            ifelse(RPL_EBM <=0.25,"low", RPL_EBM)))))
+
+eji1$SVMcat<-with(eji1,ifelse(RPL_SVM>0.75,"high",
+                              ifelse(RPL_SVM>0.50 & RPL_SVM <=0.75,"medium",
+                                     ifelse(RPL_SVM >0.25 & RPL_SVM <=0.50, "low medium",
+                                            ifelse(RPL_SVM <=0.25,"low", RPL_SVM)))))
+
+#Import and merge age, race, ethnicity files across USA
+library(readxl)
+age<-na.omit(read_excel("Age_US.xlsx"))
+View(age)
+race<-na.omit(read_excel("RaceUS.xlsx"))
+View(race)
+#________________________________________________________________________________
+##Create ethnicity file 
+library(dplyr)
+hispanic<-read_excel("hispanicUS.xlsx")
+
+nonhispanic<-read_excel("nonhispanicUS.xlsx")
+
+ethnicity<-left_join(hispanic,nonhispanic, by="GEO_ID")
+View(ethnicity) 
+###______________________________________________________________________________________________________
+
+demo1<-left_join(age,race, by="GEO_ID") 
+
+demographics<-left_join(demo1,ethnicity, by= "GEO_ID") 
+
+View(demographics)
+     
+#____________________________________________________________________________________
+places_eji<-left_join(places1,eji1,by= c("TractFIPS"="GEO_ID"))
+finaldata<-left_join(places_eji,demographics, by=c("AFFGEOID"="GEO_ID"))
+
+View(finaldata)
+#colnames(finaldata)[64]="percentagecat1"
+#colnames(finaldata)[65]="percentagecat2"
+#colnames(finaldata)[66]="percentagecat3"
+
+#write.csv(finaldata, "RESPIS_EJI.csv")
+
+finaldata0 <-as.data.frame(read_csv("RESPIS_EJI.csv"))
+finaldata<- as.data.frame(read_csv("places.csv"))
+data1<- finaldata[,c(5,45,55,59,61)]
+
+#Add leading zeros to ensure similar column merge by type. 
+add_leading_zeros <- function(x) {
+  str_pad(x, width = 11, pad = "0", side = "left")
+}
+finaldata0$TractFIPS <- add_leading_zeros(finaldata0$TractFIPS)
+
+finaldata0$TractFIPS<-as.character(finaldata0$TractFIPS)
+
+finaldata1<-left_join(finaldata0,data1, by="TractFIPS")
+
+#join final data to rural urban codes
+metro<-read_excel("ruralurbancodes2013.xls")
+
+metro[,c(1)]<-sapply(metro[,c(1)],as.numeric)
+
+finaldata2<-left_join(finaldata1, metro, by=c("CountyFIPS"="FIPS"))
+
+
+finaldata2<-as.data.frame(finaldata2)
+
+colnames(finaldata2)[52]="agecat1"
+colnames(finaldata2)[53]="agecat2"
+colnames(finaldata2)[54]="agecat3"
+
+colnames(finaldata2)[57]="percentagecat1"
+colnames(finaldata2)[58]="percentagecat2"
+colnames(finaldata2)[59]="percentagecat3"
+
+#Defining levels of category burden 
+finaldata2$EJIcat<-factor(finaldata2$EJIcat,levels=c("low","low medium","medium","high"))
+finaldata2$SVMcat<-factor(finaldata2$SVMcat,levels=c("low","low medium","medium","high"))
+finaldata2$EBMcat<-factor(finaldata2$EBMcat,levels=c("low","low medium","medium","high"))
+View(finaldata2)
+
+# Complete case extraction as per categories
+finaldata3 <- finaldata2[complete.cases(finaldata2[, c("RPL_EBM", "RPL_SVM", "EJI")]), ]
+
+#defining urban and rural columns
+finaldata3$urban<-with(finaldata3,if_else (finaldata3$RUCC_2013=="1"|finaldata3$RUCC_2013=="2"|finaldata3$RUCC_2013=="3","Yes","No"))
+finaldata3$rural<-with(finaldata3,if_else (finaldata3$RUCC_2013=="4"|finaldata3$RUCC_2013=="5"|finaldata3$RUCC_2013=="6"|
+                                             finaldata3$RUCC_2013=="7"|finaldata3$RUCC_2013=="8"|finaldata3$RUCC_2013=="9","Yes","No"))
+
+
+#defining urban and rural datasets
+urbanfinaldata3<-finaldata3[finaldata3$RUCC_2013=="1"|finaldata3$RUCC_2013=="2"|finaldata3$RUCC_2013=="3",]
+ruralfinaldata3<-finaldata3[finaldata3$RUCC_2013=="4"|finaldata3$RUCC_2013=="5"|finaldata3$RUCC_2013=="6"|
+                              finaldata3$RUCC_2013=="7"|finaldata3$RUCC_2013=="8"|finaldata3$RUCC_2013=="9",]
+
+
+sum(finaldata3$Total_population, na.rm=T)
+MeanCI(finaldata3$Total_population,na.rm=T)
+
+MedianCI(finaldata3$percent_male,na.rm = T)
+IQR(finaldata3$percent_male,na.rm = T)
+
+MedianCI(finaldata3$percent_female, na.rm = T)
+IQR(finaldata3$percent_female, na.rm = T)
+
+sum(finaldata3$agecat1,na.rm=T)
+MedianCI(finaldata3$percentagecat1,na.rm = T)
+IQR(finaldata3$percentagecat1,na.rm = T)
+
+sum(finaldata3$agecat2,na.rm=T)
+MedianCI(finaldata3$percentagecat2,na.rm = T)
+IQR(finaldata3$percentagecat2,na.rm = T)
+
+sum(finaldata3$agecat3,na.rm=T)
+MedianCI(finaldata3$percentagecat3,na.rm = T)
+IQR(finaldata3$percentagecat3,na.rm = T)
+
+sum(finaldata3$agecat4,na.rm=T)
+MedianCI(finaldata3$percentagecat4,na.rm = T)
+IQR(finaldata3$percentagecat4,na.rm = T)
+
+sum(finaldata3$agecat5,na.rm=T)
+MedianCI(finaldata3$percentagecat5,na.rm = T)
+IQR(finaldata3$percentagecat5,na.rm = T)
+
+
+
+sum(finaldata3$whites,na.rm=T)
+sum(finaldata3$blacks,na.rm = T)
+sum(finaldata3$amian,na.rm=T)
+sum(finaldata3$asian,na.rm=T)
+sum(finaldata3$nhopi,na.rm=T)
+sum(finaldata3$hispanic,na.rm = T)
+sum(finaldata3$nonhisp,na.rm = T)
+sum(finaldata3$lhi,na.rm=T)
+
+#########################################################################################################################################
+#EJI Q1 demographic data 
+
+ejiq1<-(finaldata3[finaldata3$EJIcat=="low", ])
+ejiq2<-(finaldata3[finaldata3$EJIcat=="low medium", ])
+ejiq3<-(finaldata3[finaldata3$EJIcat=="medium", ])
+ejiq4<-(finaldata3[finaldata3$EJIcat=="high", ])
+
+urbanejiq1<-ejiq1[ejiq1$RUCC_2013=="1"|ejiq1$RUCC_2013=="2"|ejiq1$RUCC_2013=="3",]
+ruralejiq1<-ejiq1[ejiq1$RUCC_2013=="4"|ejiq1$RUCC_2013=="5"|ejiq1$RUCC_2013=="6"|
+                    ejiq1$RUCC_2013=="7"|ejiq1$RUCC_2013=="8"|ejiq1$RUCC_2013=="9",]
+
+sum(ejiq1$Total_population, na.rm=T)
+MeanCI(ejiq1$Total_population,na.rm=T)
+
+MedianCI(ejiq1$percent_male,na.rm = T)
+IQR(ejiq1$percent_male,na.rm = T)
+
+MedianCI(ejiq1$percent_female, na.rm = T)
+IQR(ejiq1$percent_female, na.rm = T)
+
+sum(ejiq1$agecat1,na.rm=T)
+MedianCI(ejiq1$percentagecat1,na.rm = T)
+IQR(ejiq1$percentagecat1,na.rm = T)
+
+sum(ejiq1$agecat2,na.rm=T)
+MedianCI(ejiq1$percentagecat2,na.rm = T)
+IQR(ejiq1$percentagecat2,na.rm = T)
+
+sum(ejiq1$agecat3,na.rm=T)
+MedianCI(ejiq1$percentagecat3,na.rm = T)
+IQR(ejiq1$percentagecat3,na.rm = T)
+
+sum(ejiq1$agecat4,na.rm=T)
+MedianCI(ejiq1$percentagecat4,na.rm = T)
+IQR(ejiq1$percentagecat4,na.rm = T)
+
+sum(ejiq1$agecat5,na.rm=T)
+MedianCI(ejiq1$percentagecat5,na.rm = T)
+IQR(ejiq1$percentagecat5,na.rm = T)
+
+sum(ejiq1$whites,na.rm=T)
+sum(ejiq1$blacks,na.rm = T)
+sum(ejiq1$amian,na.rm=T)
+sum(ejiq1$asian,na.rm=T)
+sum(ejiq1$nhopi,na.rm=T)
+sum(ejiq1$hispanic,na.rm = T)
+sum(ejiq1$nonhisp,na.rm = T)
+sum(ejiq1$lhi,na.rm=T)
+#########################################################################################
+#EJI Q2 demographic data
+urbanejiq2<-ejiq2[ejiq2$RUCC_2013=="1"|ejiq2$RUCC_2013=="2"|ejiq2$RUCC_2013=="3",]
+ruralejiq2<-ejiq2[ejiq2$RUCC_2013=="4"|ejiq2$RUCC_2013=="5"|ejiq2$RUCC_2013=="6"|
+                    ejiq2$RUCC_2013=="7"|ejiq2$RUCC_2013=="8"|ejiq2$RUCC_2013=="9",]
+
+sum(ejiq2$Total_population, na.rm=T)
+MeanCI(ejiq2$Total_population,na.rm=T)
+
+MeanCI(ejiq2$Male,na.rm = T)
+IQR(ejiq2$percent_male,na.rm = T)
+
+MedianCI(ejiq2$percent_female, na.rm = T)
+IQR(ejiq2$percent_female, na.rm = T)
+
+sum(ejiq2$agecat1,na.rm=T)
+MedianCI(ejiq2$percentagecat1,na.rm = T)
+IQR(ejiq2$percentagecat1,na.rm = T)
+
+sum(ejiq2$agecat2,na.rm=T)
+MedianCI(ejiq2$percentagecat2,na.rm = T)
+IQR(ejiq2$percentagecat2,na.rm = T)
+
+sum(ejiq2$agecat3,na.rm=T)
+MedianCI(ejiq2$percentagecat3,na.rm = T)
+IQR(ejiq2$percentagecat3,na.rm = T)
+
+sum(ejiq2$agecat4,na.rm=T)
+MedianCI(ejiq2$percentagecat4,na.rm = T)
+IQR(ejiq2$percentagecat4,na.rm = T)
+
+sum(ejiq2$agecat5,na.rm=T)
+MedianCI(ejiq2$percentagecat5,na.rm = T)
+IQR(ejiq2$percentagecat5,na.rm = T)
+
+
+
+sum(ejiq2$whites,na.rm=T)
+sum(ejiq2$blacks,na.rm = T)
+sum(ejiq2$amian,na.rm=T)
+sum(ejiq2$asian,na.rm=T)
+sum(ejiq2$nhopi,na.rm=T)
+sum(ejiq2$hispanic,na.rm = T)
+sum(ejiq2$nonhisp,na.rm = T)
+sum(ejiq2$lhi,na.rm=T)
+#####################################################################################
+#EJIQ3 demographic data
+urbanejiq3<-ejiq3[ejiq3$RUCC_2013=="1"|ejiq3$RUCC_2013=="2"|ejiq3$RUCC_2013=="3",]
+ruralejiq3<-ejiq3[ejiq3$RUCC_2013=="4"|ejiq3$RUCC_2013=="5"|ejiq3$RUCC_2013=="6"|
+                    ejiq3$RUCC_2013=="7"|ejiq3$RUCC_2013=="8"|ejiq3$RUCC_2013=="9",]
+
+sum(ejiq3$Total_population, na.rm=T)
+MeanCI(ejiq3$Total_population,na.rm=T)
+
+MedianCI(ejiq3$percent_male,na.rm = T)
+IQR(ejiq3$percent_male,na.rm = T)
+
+MedianCI(ejiq3$percent_female, na.rm = T)
+IQR(ejiq3$percent_female, na.rm = T)
+
+sum(ejiq3$agecat1,na.rm=T)
+MedianCI(ejiq3$percentagecat1,na.rm = T)
+IQR(ejiq3$percentagecat1,na.rm = T)
+
+sum(ejiq3$agecat2,na.rm=T)
+MedianCI(ejiq3$percentagecat2,na.rm = T)
+IQR(ejiq3$percentagecat2,na.rm = T)
+
+sum(ejiq3$agecat3,na.rm=T)
+MedianCI(ejiq3$percentagecat3,na.rm = T)
+IQR(ejiq3$percentagecat3,na.rm = T)
+
+sum(ejiq3$agecat4,na.rm=T)
+MedianCI(ejiq3$percentagecat4,na.rm = T)
+IQR(ejiq3$percentagecat4,na.rm = T)
+
+sum(ejiq3$agecat5,na.rm=T)
+MedianCI(ejiq3$percentagecat5,na.rm = T)
+IQR(ejiq3$percentagecat5,na.rm = T)
+
+
+sum(ejiq3$whites,na.rm=T)
+sum(ejiq3$blacks,na.rm = T)
+sum(ejiq3$amian,na.rm=T)
+sum(ejiq3$asian,na.rm=T)
+sum(ejiq3$nhopi,na.rm=T)
+sum(ejiq3$hispanic,na.rm = T)
+sum(ejiq3$nonhisp,na.rm = T)
+sum(ejiq3$lhi,na.rm=T)
+#######################################################################################
+#EJI Q4 demographic data
+urbanejiq4<-ejiq4[ejiq4$RUCC_2013=="1"|ejiq4$RUCC_2013=="2"|ejiq4$RUCC_2013=="3",]
+ruralejiq4<-ejiq4[ejiq4$RUCC_2013=="4"|ejiq4$RUCC_2013=="5"|ejiq4$RUCC_2013=="6"|
+                    ejiq4$RUCC_2013=="7"|ejiq4$RUCC_2013=="8"|ejiq4$RUCC_2013=="9",]
+
+sum(ejiq4$Total_population, na.rm=T)
+MeanCI(ejiq4$Total_population,na.rm=T)
+
+MedianCI(ejiq4$percent_male,na.rm = T)
+IQR(ejiq4$percent_male,na.rm = T)
+
+MedianCI(ejiq4$percent_female, na.rm = T)
+IQR(ejiq4$percent_female, na.rm = T)
+
+sum(ejiq4$agecat1,na.rm=T)
+MedianCI(ejiq4$percentagecat1,na.rm = T)
+IQR(ejiq4$percentagecat1,na.rm = T)
+
+sum(ejiq4$agecat2,na.rm=T)
+MedianCI(ejiq4$percentagecat2,na.rm = T)
+IQR(ejiq4$percentagecat2,na.rm = T)
+
+sum(ejiq4$agecat3,na.rm=T)
+MedianCI(ejiq4$percentagecat3,na.rm = T)
+IQR(ejiq4$percentagecat3,na.rm = T)
+
+sum(ejiq4$agecat4,na.rm=T)
+MedianCI(ejiq4$percentagecat4,na.rm = T)
+IQR(ejiq4$percentagecat4,na.rm = T)
+
+sum(ejiq4$agecat5,na.rm=T)
+MedianCI(ejiq4$percentagecat5,na.rm = T)
+IQR(ejiq4$percentagecat5,na.rm = T)
+
+
+
+sum(ejiq4$whites,na.rm=T)
+sum(ejiq4$blacks,na.rm = T)
+sum(ejiq4$amian,na.rm=T)
+sum(ejiq4$asian,na.rm=T)
+sum(ejiq4$nhopi,na.rm=T)
+sum(ejiq4$hispanic,na.rm = T)
+sum(ejiq4$nonhisp,na.rm = T)
+sum(ejiq4$lhi,na.rm=T)
+
+
+
+#######################################################################################
+ebmq1<-finaldata3[finaldata3$EBMcat=="low",]
+ebmq2<-finaldata3[finaldata3$EBMcat=="low medium",]
+ebmq3<-finaldata3[finaldata3$EBMcat=="medium",]
+ebmq4<-finaldata3[finaldata3$EBMcat=="high",]
+
+
+
+
+sum(ebmq1$Total_population, na.rm=T)
+
+ruralebmq1<-ebmq1[ebmq1$RUCC_2013=="4"|ebmq1$RUCC_2013=="5"|
+                    ebmq1$RUCC_2013=="6"|ebmq1$RUCC_2013=="7"|ebmq1$RUCC_2013=="8"|
+                    ebmq1$RUCC_2013=="9",]
+urbanebmq1<-ebmq1[ebmq1$RUCC_2013=="1"|ebmq1$RUCC_2013=="2"|
+                    ebmq1$RUCC_2013=="3",]
+
+
+MedianCI(ebmq1$percent_male,na.rm=T)
+IQR(ebmq1$percent_male,na.rm=T)
+MedianCI(ebmq1$percent_female,na.rm=T)
+IQR(ebmq1$percent_female,na.rm=T)
+
+sum(ebmq1$agecat1,na.rm=T)
+MedianCI(ebmq1$percentagecat1,na.rm=T)
+IQR(ebmq1$percentagecat1,na.rm = T)
+
+sum(ebmq1$agecat2,na.rm=T)
+MedianCI(ebmq1$percentagecat2,na.rm = T)
+IQR(ebmq1$percentagecat2,na.rm = T)
+
+sum(ebmq1$agecat3,na.rm=T)
+MedianCI(ebmq1$percentagecat3,na.rm = T)
+IQR(ebmq1$percentagecat3,na.rm = T)
+
+sum(ebmq1$agecat4,na.rm=T)
+MedianCI(ebmq1$percentagecat4,na.rm = T)
+IQR(ebmq1$percentagecat4,na.rm = T)
+
+sum(ebmq1$agecat5,na.rm=T)
+MedianCI(ebmq1$percentagecat5,na.rm = T)
+IQR(ebmq1$percentagecat5,na.rm = T)
+
+sum(ebmq1$whites,na.rm=T)
+sum(ebmq1$blacks,na.rm = T)
+sum(ebmq1$amian,na.rm=T)
+sum(ebmq1$asian,na.rm=T)
+sum(ebmq1$nhopi,na.rm=T)
+sum(ebmq1$hispanic,na.rm = T)
+sum(ebmq1$nonhisp,na.rm = T)
+sum(ebmq1$lhi,na.rm=T)
+#########################################################################################
+ruralebmq2<-ebmq2[ebmq2$RUCC_2013=="4"|ebmq2$RUCC_2013=="5"|
+                    ebmq2$RUCC_2013=="6"|ebmq2$RUCC_2013=="7"|ebmq2$RUCC_2013=="8"|
+                    ebmq2$RUCC_2013=="9",]
+urbanebmq2<-ebmq2[ebmq2$RUCC_2013=="1"|ebmq2$RUCC_2013=="2"|
+                    ebmq2$RUCC_2013=="3",]
+
+
+MedianCI(ebmq2$percent_male,na.rm=T)
+IQR(ebmq2$percent_male,na.rm=T)
+MedianCI(ebmq2$percent_female,na.rm=T)
+IQR(ebmq2$percent_female,na.rm=T)
+
+sum(ebmq2$agecat1,na.rm=T)
+MedianCI(ebmq2$percentagecat1,na.rm = T)
+IQR(ebmq2$percentagecat1,na.rm = T)
+
+sum(ebmq2$agecat2,na.rm=T)
+MedianCI(ebmq2$percentagecat2,na.rm = T)
+IQR(ebmq2$percentagecat2,na.rm = T)
+sum(ebmq2$agecat3,na.rm=T)
+MedianCI(ebmq2$percentagecat3,na.rm = T)
+IQR(ebmq2$percentagecat3,na.rm = T)
+sum(ebmq2$agecat4,na.rm=T)
+MedianCI(ebmq2$percentagecat4,na.rm = T)
+IQR(ebmq2$percentagecat4,na.rm = T)
+sum(ebmq2$agecat5,na.rm=T)
+MedianCI(ebmq2$percentagecat5,na.rm = T)
+IQR(ebmq2$percentagecat5,na.rm = T)
+
+sum(ebmq2$whites,na.rm=T)
+sum(ebmq2$blacks,na.rm = T)
+sum(ebmq2$amian,na.rm=T)
+sum(ebmq2$asian,na.rm=T)
+sum(ebmq2$nhopi,na.rm=T)
+sum(ebmq2$hispanic,na.rm = T)
+sum(ebmq2$nonhisp,na.rm = T)
+sum(ebmq2$lhi,na.rm=T)
+#####################################################################################
+ruralebmq3<-ebmq3[ebmq3$RUCC_2013=="4"|ebmq3$RUCC_2013=="5"|
+                    ebmq3$RUCC_2013=="6"|ebmq3$RUCC_2013=="7"|ebmq3$RUCC_2013=="8"|
+                    ebmq3$RUCC_2013=="9",]
+urbanebmq3<-ebmq3[ebmq3$RUCC_2013=="1"|ebmq3$RUCC_2013=="2"|
+                    ebmq3$RUCC_2013=="3",]
+
+MedianCI(ebmq3$percent_male,na.rm=T)
+IQR(ebmq3$percent_male,na.rm=T)
+MedianCI(ebmq3$percent_female,na.rm=T)
+IQR(ebmq3$percent_female,na.rm=T)
+
+sum(ebmq3$agecat1,na.rm=T)
+MedianCI(ebmq3$percentagecat1,na.rm = T)
+IQR(ebmq3$percentagecat1,na.rm = T)
+
+sum(ebmq3$agecat2,na.rm=T)
+MedianCI(ebmq3$percentagecat2,na.rm = T)
+IQR(ebmq3$percentagecat2,na.rm = T)
+sum(ebmq3$agecat3,na.rm=T)
+MedianCI(ebmq3$percentagecat3,na.rm = T)
+IQR(ebmq3$percentagecat3,na.rm = T)
+sum(ebmq3$agecat4,na.rm=T)
+MedianCI(ebmq3$percentagecat4,na.rm = T)
+IQR(ebmq3$percentagecat4,na.rm = T)
+sum(ebmq3$agecat5,na.rm=T)
+MedianCI(ebmq3$percentagecat5,na.rm = T)
+IQR(ebmq3$percentagecat5,na.rm = T)
+
+
+sum(ebmq3$whites,na.rm=T)
+sum(ebmq3$blacks,na.rm = T)
+sum(ebmq3$amian,na.rm=T)
+sum(ebmq3$asian,na.rm=T)
+sum(ebmq3$nhopi,na.rm=T)
+sum(ebmq3$hispanic,na.rm = T)
+sum(ebmq3$nonhisp,na.rm = T)
+sum(ebmq3$lhi,na.rm=T)
+#######################################################################################
+ruralebmq4<-ebmq4[ebmq4$RUCC_2013=="4"|ebmq4$RUCC_2013=="5"|
+                    ebmq4$RUCC_2013=="6"|ebmq4$RUCC_2013=="7"|ebmq4$RUCC_2013=="8"|
+                    ebmq4$RUCC_2013=="9",]
+urbanebmq4<-ebmq4[ebmq4$RUCC_2013=="1"|ebmq4$RUCC_2013=="2"|
+                    ebmq4$RUCC_2013=="3",]
+MedianCI(ebmq4$percent_male,na.rm=T)
+IQR(ebmq4$percent_male,na.rm=T)
+MedianCI(ebmq4$percent_female,na.rm=T)
+IQR(ebmq4$percent_female,na.rm=T)
+
+sum(ebmq4$agecat1,na.rm=T)
+MedianCI(ebmq4$percentagecat1,na.rm = T)
+IQR(ebmq4$percentagecat1,na.rm = T)
+
+sum(ebmq4$agecat2,na.rm=T)
+MedianCI(ebmq4$percentagecat2,na.rm = T)
+IQR(ebmq4$percentagecat2,na.rm = T)
+sum(ebmq4$agecat3,na.rm=T)
+MedianCI(ebmq4$percentagecat3,na.rm = T)
+IQR(ebmq4$percentagecat3,na.rm = T)
+sum(ebmq4$agecat4,na.rm=T)
+MedianCI(ebmq4$percentagecat4,na.rm = T)
+IQR(ebmq4$percentagecat4,na.rm = T)
+sum(ebmq4$agecat5,na.rm=T)
+MedianCI(ebmq4$percentagecat5,na.rm = T)
+IQR(ebmq4$percentagecat5,na.rm = T)
+
+
+sum(ebmq4$whites,na.rm=T)
+sum(ebmq4$blacks,na.rm = T)
+sum(ebmq4$amian,na.rm=T)
+sum(ebmq4$asian,na.rm=T)
+sum(ebmq4$nhopi,na.rm=T)
+sum(ebmq4$hispanic,na.rm = T)
+sum(ebmq4$nonhisp,na.rm = T)
+sum(ebmq4$lhi,na.rm=T)
+#################################################################################
+#Poisson regression for unadjusted models #interchange asthma and COPD to obtain respective results
+model0<-glm(asthma ~ EJIcat+offset(log(Total_population)),
+            family = quasipoisson(link="log"),
+            data= finaldata3)
+
+summary(model0)
+coef(summary(model0))
+exp(coef(model0))
+cbind(RR = exp(coef(model0)),CI= exp(confint(model0)),p_value= format.pval(summary(model0)$coef[ , 4], eps = .001, digits = 2))
+
+model00<-glm(asthma ~ EJIcat+offset(log(Total_population))++percentagecat1+
+               percentagecat2+percentagecat3,
+            family = quasipoisson(link="log"),
+            data= finaldata3)
+
+summary(model00)
+coef(summary(model00))
+exp(coef(model00))
+cbind(RR = exp(coef(model00)),CI= exp(confint(model00)),p_value= format.pval(summary(model00)$coef[ , 4], eps = .001, digits = 2))
+
+model000<-glm(asthma ~ EJIcat+offset(log(Total_population))++percentagecat1+
+               percentagecat2+percentagecat3+checks+percent_male+rural+smoking,
+             family = quasipoisson(link="log"),
+             data= finaldata3)
+
+summary(model000)
+coef(summary(model000))
+exp(coef(model000))
+cbind(RR = exp(coef(model000)),CI= exp(confint(model000)),p_value= format.pval(summary(model000)$coef[ , 4], eps = .001, digits = 2))
+
+###################################################################################
+#Poisson regression for unadjusted models
+model1<-glm(asthma ~ EBMcat+offset(log(Total_population)),
+            family = quasipoisson(link="log"),
+            data= finaldata3)
+
+summary(model1)
+coef(summary(model1))
+exp(coef(model1))
+cbind(RR = exp(coef(model1)),CI= exp(confint(model1)),p_value= format.pval(summary(model1)$coef[ , 4], eps = .001, digits = 2))
+
+model11<-glm(asthma ~ SVMcat+offset(log(Total_population)),
+            family = quasipoisson(link="log"),
+            data= finaldata3)
+
+summary(model11)
+coef(summary(model11))
+exp(coef(model11))
+cbind(RR = exp(coef(model11)),CI= exp(confint(model11)),p_value= format.pval(summary(model11)$coef[ , 4], eps = .001, digits = 2))
+
+####################################################################################################
+model2<-glm(copd ~ EBMcat+ offset(log(Total_population)),
+            family = quasipoisson(link="log"),
+            data= finaldata3)
+
+summary(model2)
+coef(summary(model2))
+exp(coef(model2))
+cbind(RR = exp(coef(model2)),CI= exp(confint(model2)),p_value= format.pval(summary(model2)$coef[ , 4], eps = .001, digits = 2))
+
+model22<-glm(copd ~ SVMcat+ offset(log(Total_population)),
+            family = quasipoisson(link="log"),
+            data= finaldata3)
+
+summary(model22)
+coef(summary(model22))
+exp(coef(model22))
+cbind(RR = exp(coef(model22)),CI= exp(confint(model22)),p_value= format.pval(summary(model22)$coef[ , 4], eps = .001, digits = 2))
+
+####################################################################################################
+# Age category adjusted models for asthma
+model3<-glm(asthma ~ EBMcat+SVMcat+ EBMcat:SVMcat+ offset(log(Total_population))+percentagecat1+
+              percentagecat2+percentagecat3,#+checks+percent_male+rural+smoking,
+            family = quasipoisson(link="log"),
+            data= finaldata3)
+
+summary(model3)
+coef(summary(model3))
+exp(coef(model3))
+cbind(RR = exp(coef(model3)),CI= exp(confint(model3)),p_value= format.pval(summary(model3)$coef[ , 4], eps = .001, digits = 2))
+
+
+####################################################################################################
+# Age adjusted model for COPD
+model4<-glm(copd ~ SVMcat+EBMcat+SVMcat:EBMcat+ offset(log(Total_population))+percentagecat1+
+              percentagecat2+percentagecat3,
+            family = quasipoisson(link="log"),
+            data= finaldata3)
+
+summary(model4)
+coef(summary(model4))
+exp(coef(model4))
+cbind(RR = exp(coef(model4)),CI= exp(confint(model4)),p_value= format.pval(summary(model4)$coef[ , 4], eps = .001, digits = 2))
+#####################################################################################################
+# Age category, smoking, urban rural status, gender percentage and healthcare visit adjusted model for asthma
+model5<-glm(asthma ~ SVMcat+EBMcat+SVMcat:EBMcat+ offset(log(Total_population))+percentagecat1+
+              percentagecat2+percentagecat3+checks+percent_male+rural+smoking,
+            family = quasipoisson(link="log"),
+            data= finaldata3)
+
+summary(model5)
+coef(summary(model5))
+exp(coef(model5))
+cbind(RR = exp(coef(model5)),CI= exp(confint(model5)),p_value= format.pval(summary(model5)$coef[ , 4], eps = .001, digits = 2))
+
+####################################################################################################
+# Age category, smoking, urban rural status, gender percentage and healthcare visit adjusted model for COPD
+model6<-glm(copd ~ SVMcat+EBMcat+SVMcat:EBMcat+ offset(log(Total_population))+percentagecat1+
+              percentagecat2+percentagecat3+checks+percent_male+rural+smoking,
+            family = quasipoisson(link="log"),
+            data= finaldata3)
+
+summary(model6)
+coef(summary(model6))
+exp(coef(model6))
+cbind(RR = exp(coef(model6)),CI= exp(confint(model6)),p_value= format.pval(summary(model6)$coef[ , 4], eps = .001, digits = 2))
+#####################################################################################################
+
+# Asthma prevalence per EJI/SVM/EBM quartile 
+EJIQ1<-finaldata3[finaldata3$EJIcat=="low",]
+Mean(EJIQ1$asthma,na.rm=T)
+sd(EJIQ1$asthma,na.rm=T)
+EJIQ2<-finaldata3[finaldata3$EJIcat=="low medium",]
+Mean(EJIQ2$asthma,na.rm=T)
+sd(EJIQ2$asthma,na.rm=T)
+EJIQ3<-finaldata3[finaldata3$EJIcat=="medium",]
+Mean(EJIQ3$asthma,na.rm=T)
+sd(EJIQ3$asthma,na.rm=T)
+EJIQ4<-finaldata3[finaldata3$EJIcat=="high",]
+Mean(EJIQ4$asthma,na.rm=T)
+sd(EJIQ4$asthma,na.rm=T)
+
+EBMQ1<-finaldata3[finaldata3$EBMcat=="low",]
+Mean(EBMQ1$asthma,na.rm=T)
+sd(EBMQ1$asthma,na.rm=T)
+EBMQ2<-finaldata3[finaldata3$EBMcat=="low medium",]
+Mean(EBMQ2$asthma,na.rm=T)
+sd(EBMQ2$asthma,na.rm=T)
+EBMQ3<-finaldata3[finaldata3$EBMcat=="medium",]
+Mean(EBMQ3$asthma,na.rm=T)
+sd(EBMQ3$asthma,na.rm=T)
+EBMQ4<-finaldata3[finaldata3$EBMcat=="high",]
+Mean(EBMQ4$asthma,na.rm=T)
+sd(EBMQ4$asthma,na.rm=T)
+
+SVMQ1<-finaldata3[finaldata3$SVMcat=="low",]
+Mean(SVMQ1$asthma,na.rm=T)
+sd(SVMQ1$asthma,na.rm=T)
+SVMQ2<-finaldata3[finaldata3$SVMcat=="low medium",]
+Mean(SVMQ2$asthma,na.rm=T)
+sd(SVMQ2$asthma,na.rm=T)
+SVMQ3<-finaldata3[finaldata3$SVMcat=="medium",]
+Mean(SVMQ3$asthma,na.rm=T)
+sd(SVMQ3$asthma,na.rm=T)
+SVMQ4<-finaldata3[finaldata3$SVMcat=="high",]
+Mean(SVMQ4$asthma,na.rm=T)
+sd(SVMQ4$asthma,na.rm=T)
+
+
+# COPD prevalence per EJI/EBM/SVM quartile 
+EJIQ1<-finaldata3[finaldata3$EJIcat=="low",]
+Mean(EJIQ1$copd,na.rm=T)
+sd(EJIQ1$copd,na.rm=T)
+EJIQ2<-finaldata3[finaldata3$EJIcat=="low medium",]
+Mean(EJIQ2$copd,na.rm=T)
+sd(EJIQ2$copd,na.rm=T)
+EJIQ3<-finaldata3[finaldata3$EJIcat=="medium",]
+Mean(EJIQ3$copd,na.rm=T)
+sd(EJIQ3$copd,na.rm=T)
+EJIQ4<-finaldata3[finaldata3$EJIcat=="high",]
+Mean(EJIQ4$copd,na.rm=T)
+sd(EJIQ4$copd,na.rm=T)
+
+EBMQ1<-finaldata3[finaldata3$EBMcat=="low",]
+Mean(EBMQ1$copd,na.rm=T)
+sd(EBMQ1$copd,na.rm=T)
+EBMQ2<-finaldata3[finaldata3$EBMcat=="low medium",]
+Mean(EBMQ2$copd,na.rm=T)
+sd(EBMQ2$copd,na.rm=T)
+EBMQ3<-finaldata3[finaldata3$EBMcat=="medium",]
+Mean(EBMQ3$copd,na.rm=T)
+sd(EBMQ3$copd,na.rm=T)
+EBMQ4<-finaldata3[finaldata3$EBMcat=="high",]
+Mean(EBMQ4$copd,na.rm=T)
+sd(EBMQ4$copd,na.rm=T)
+
+SVMQ1<-finaldata3[finaldata3$SVMcat=="low",]
+Mean(SVMQ1$copd,na.rm=T)
+sd(SVMQ1$copd,na.rm=T)
+SVMQ2<-finaldata3[finaldata3$SVMcat=="low medium",]
+Mean(SVMQ2$copd,na.rm=T)
+sd(SVMQ2$copd,na.rm=T)
+SVMQ3<-finaldata3[finaldata3$SVMcat=="medium",]
+Mean(SVMQ3$copd,na.rm=T)
+sd(SVMQ3$copd,na.rm=T)
+SVMQ4<-finaldata3[finaldata3$SVMcat=="high",]
+Mean(SVMQ4$copd,na.rm=T)
+sd(SVMQ4$copd,na.rm=T)
+
+#Descriptive stats 
+EJIQ1<-finaldata3[finaldata3$EJIcat=="low",]
+Mean(EJIQ1$smoking,na.rm=T)
+sd(EJIQ1$smoking,na.rm=T)
+EJIQ2<-finaldata3[finaldata3$EJIcat=="low medium",]
+Mean(EJIQ2$smoking,na.rm=T)
+sd(EJIQ2$smoking,na.rm=T)
+EJIQ3<-finaldata3[finaldata3$EJIcat=="medium",]
+Mean(EJIQ3$smoking,na.rm=T)
+sd(EJIQ3$smoking,na.rm=T)
+EJIQ4<-finaldata3[finaldata3$EJIcat=="high",]
+Mean(EJIQ4$smoking,na.rm=T)
+sd(EJIQ4$smoking,na.rm=T)
+
+EBMQ1<-finaldata3[finaldata3$EBMcat=="low",]
+Mean(EBMQ1$smoking,na.rm=T)
+sd(EBMQ1$smoking,na.rm=T)
+EBMQ2<-finaldata3[finaldata3$EBMcat=="low medium",]
+Mean(EBMQ2$smoking,na.rm=T)
+sd(EBMQ2$smoking,na.rm=T)
+EBMQ3<-finaldata3[finaldata3$EBMcat=="medium",]
+Mean(EBMQ3$smoking,na.rm=T)
+sd(EBMQ3$smoking,na.rm=T)
+EBMQ4<-finaldata3[finaldata3$EBMcat=="high",]
+Mean(EBMQ4$smoking,na.rm=T)
+sd(EBMQ4$smoking,na.rm=T)
+
+SVMQ1<-finaldata3[finaldata3$SVMcat=="low",]
+Mean(SVMQ1$smoking,na.rm=T)
+sd(SVMQ1$smoking,na.rm=T)
+SVMQ2<-finaldata3[finaldata3$SVMcat=="low medium",]
+Mean(SVMQ2$smoking,na.rm=T)
+sd(SVMQ2$smoking,na.rm=T)
+SVMQ3<-finaldata3[finaldata3$SVMcat=="medium",]
+Mean(SVMQ3$smoking,na.rm=T)
+sd(SVMQ3$smoking,na.rm=T)
+SVMQ4<-finaldata3[finaldata3$SVMcat=="high",]
+Mean(SVMQ4$smoking,na.rm=T)
+sd(SVMQ4$smoking,na.rm=T)
+###########################################################################################
+EJIQ1<-finaldata3[finaldata3$EJIcat=="low",]
+Mean(EJIQ1$checks,na.rm=T)
+sd(EJIQ1$checks,na.rm=T)
+EJIQ2<-finaldata3[finaldata3$EJIcat=="low medium",]
+Mean(EJIQ2$checks,na.rm=T)
+sd(EJIQ2$checks,na.rm=T)
+EJIQ3<-finaldata3[finaldata3$EJIcat=="medium",]
+Mean(EJIQ3$checks,na.rm=T)
+sd(EJIQ3$checks,na.rm=T)
+EJIQ4<-finaldata3[finaldata3$EJIcat=="high",]
+Mean(EJIQ4$checks,na.rm=T)
+sd(EJIQ4$checks,na.rm=T)
+
+EBMQ1<-finaldata3[finaldata3$EBMcat=="low",]
+Mean(EBMQ1$checks,na.rm=T)
+sd(EBMQ1$checks,na.rm=T)
+EBMQ2<-finaldata3[finaldata3$EBMcat=="low medium",]
+Mean(EBMQ2$checks,na.rm=T)
+sd(EBMQ2$checks,na.rm=T)
+EBMQ3<-finaldata3[finaldata3$EBMcat=="medium",]
+Mean(EBMQ3$checks,na.rm=T)
+sd(EBMQ3$checks,na.rm=T)
+EBMQ4<-finaldata3[finaldata3$EBMcat=="high",]
+Mean(EBMQ4$checks,na.rm=T)
+sd(EBMQ4$checks,na.rm=T)
+
+SVMQ1<-finaldata3[finaldata3$SVMcat=="low",]
+Mean(SVMQ1$checks,na.rm=T)
+sd(SVMQ1$checks,na.rm=T)
+SVMQ2<-finaldata3[finaldata3$SVMcat=="low medium",]
+Mean(SVMQ2$checks,na.rm=T)
+sd(SVMQ2$checks,na.rm=T)
+SVMQ3<-finaldata3[finaldata3$SVMcat=="medium",]
+Mean(SVMQ3$checks,na.rm=T)
+sd(SVMQ3$checks,na.rm=T)
+SVMQ4<-finaldata3[finaldata3$SVMcat=="high",]
+Mean(SVMQ4$checks,na.rm=T)
+sd(SVMQ4$checks,na.rm=T)
+########################################################################
+
+ebmq1<-(finaldata3[finaldata3$EBMcat=="low", ])
+ebmq2<-(finaldata3[finaldata3$EBMcat=="low medium", ])
+ebmq3<-(finaldata3[finaldata3$EBMcat=="medium", ])
+ebmq4<-(finaldata3[finaldata3$EBMcat=="high", ])
+
+model7<-glm(asthma ~ SVMcat+ offset(log(Total_population))+percentagecat1+
+              percentagecat2+percentagecat3+checks+percent_male+rural+smoking,
+            family = quasipoisson(link="log"),
+            data= ebmq4) # change the data=ebmq2/q3/q4
+
+summary(model7)
+coef(summary(model7))
+exp(coef(model7))
+cbind(RR = exp(coef(model7)),CI= exp(confint(model7)),p_value= format.pval(summary(model7)$coef[ , 4], eps = .001, digits = 2))
+
+#####################################################################################################
+# Regression models per burden of SVM as per graduated EBM levels 
+model8<-glm(asthma ~ SVMcat+ offset(log(Total_population))+percentagecat1+
+              percentagecat2+percentagecat3+checks+percent_male+rural+smoking,
+            family = quasipoisson(link="log"),
+            data= ebmq4) # change the data=ebmq2/q3/q4
+
+summary(model8)
+coef(summary(model8))
+exp(coef(model8))
+cbind(RR = exp(coef(model8)),CI= exp(confint(model8)),p_value= format.pval(summary(model8)$coef[ , 4], eps = .001, digits = 2))
+
+model8a<-glm(copd ~ SVMcat+ offset(log(Total_population))+percentagecat1+
+              percentagecat2+percentagecat3+checks+percent_male+rural+smoking,
+            family = quasipoisson(link="log"),
+            data= ebmq1) # change the data=ebmq2/q3/q4
+
+summary(model8a)
+coef(summary(model8a))
+exp(coef(model8a))
+cbind(RR = exp(coef(model8a)),CI= exp(confint(model8a)),p_value= format.pval(summary(model8a)$coef[ , 4], eps = .001, digits = 2))
+#############################################################################################################################
+
+# Regression models per burden of EBM as per graduated SBM levels 
+
+svmq1<-(finaldata3[finaldata3$SVMcat=="low", ])
+svmq2<-(finaldata3[finaldata3$SVMcat=="low medium", ])
+svmq3<-(finaldata3[finaldata3$SVMcat=="medium", ])
+svmq4<-(finaldata3[finaldata3$SVMcat=="high", ])
+
+
+model9<-glm(asthma ~ EBMcat+offset(log(Total_population))+percentagecat1+
+              percentagecat2+percentagecat3+checks+percent_male+rural+smoking,
+            family = quasipoisson(link="log"),
+            data= svmq1) # change the data=svmq2/q3/q4
+
+summary(model9)
+coef(summary(model9))
+exp(coef(model9))
+cbind(RR = exp(coef(model9)),CI= exp(confint(model9)),p_value= format.pval(summary(model9)$coef[ , 4], eps = .001, digits = 2))
+
+model9<-glm(asthma ~ EBMcat+offset(log(Total_population))+percentagecat1+
+              percentagecat2+percentagecat3+checks+percent_male+rural+smoking,
+            family = quasipoisson(link="log"),
+            data= svmq1) # change the data=svmq2/q3/q4
+
+summary(model9)
+coef(summary(model9))
+exp(coef(model9))
+cbind(RR = exp(coef(model9)),CI= exp(confint(model9)),p_value= format.pval(summary(model9)$coef[ , 4], eps = .001, digits = 2))
+
+####################################################################################################
+model10<-glm(copd ~ EBMcat+ offset(log(Total_population))+percentagecat1+
+              percentagecat2+percentagecat3+checks+percent_male+rural+smoking,
+            family = quasipoisson(link="log"),
+            data= svmq1) #change the data=svmq2/q3/q4
+
+summary(model10)
+coef(summary(model10))
+exp(coef(model10))
+cbind(RR = exp(coef(model10)),CI= exp(confint(model10)),p_value= format.pval(summary(model10)$coef[ , 4], eps = .001, digits = 2))
+
+
+###################################################################################################################################
+
+
